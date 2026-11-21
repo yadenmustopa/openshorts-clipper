@@ -13,9 +13,12 @@ codebase — read it in full. It is extended, not replaced, by:
 
 - `AGENTS.md` — agent-agnostic hard rules for this fork (local-first, no
   mandatory paid API, license boundaries, no speculative deletion).
-- `docs/clipper/PRD.md`, `ARCHITECTURE.md`, `ROADMAP.md`,
-  `ACCEPTANCE_TESTS.md`, `AUDIT_REPORT.md` — this fork's product/technical
-  spec and the Phase 0 dependency + license audit.
+- `docs/PRD_OpenShorts_Clipper_Claude_Work.md` — the source-of-truth PRD
+  supplied by the user. `docs/PRD.md`, `ARCHITECTURE.md`, `ROADMAP.md`,
+  `UPSTREAM_AUDIT.md`, `LICENSE_AUDIT.md`, `ACCEPTANCE_TESTS.md`,
+  `ADR/0001-fork-and-worker-boundaries.md` — this fork's working
+  implementation of that PRD. `docs/PRD_GAP_ANALYSIS.md` tracks known
+  deltas between the two.
 
 Key deltas from upstream you must keep in mind while editing:
 
