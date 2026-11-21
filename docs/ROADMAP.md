@@ -27,24 +27,45 @@ status reflects actual work done, not intent.
 
 ## Phase 1 — Clipper-Only + Local Models (in progress)
 
-- [ ] Disable UGC/TTS/dubbing/publishing/billing/cloud-gallery in **both**
-      the UI and the backend route (defense in depth — a hidden button
-      with a live endpoint behind it does not satisfy this).
-- [ ] Headless baseline: transcribe → rank → clip → 9:16 export using a
-      local LLM (`LLM_BASE_URL`), with per-stage logging and acceptance
-      checks.
-- [ ] Ollama integration validated empirically: JSON validity and
-      selection-quality checked against what's actually installed
-      (`qwen3:4b`, `qwen2.5-coder:1.5b`, `llava:7b`), not assumed adequate
-      just because upstream supports the mechanism.
-- [ ] Pass a one-local-video smoke test with no Gemini/fal.ai/ElevenLabs —
-      **blocked on a usable fixture**: `demo-openshorts.mp4` has audio but
-      0 detected speech segments (it correctly exercises PRD acceptance
-      scenario #4, "silent video," not scenario #1, "single speaker");
-      none of `dashboard/public/demo/*.mp4` have an audio track at all. A
-      real speech-bearing fixture is needed and is a pending decision with
-      the user (download a short section of a clearly-licensed source vs.
-      a user-supplied local file vs. deferring).
+- [x] Centralized `feature_flags.py` (`CLIPPER_ENABLED`, `LOCAL_LLM_ENABLED`
+      default on; `UGC_ENABLED`, `TTS_ENABLED`, `DUBBING_ENABLED`,
+      `SOCIAL_PUBLISHING_ENABLED`, `GEMINI_VISION_ENABLED`,
+      `CLOUD_BILLING_ENABLED` default off). Wired into every backend route
+      that reaches UGC/TTS/dubbing/social-publishing/Gemini-vision code
+      (26 call sites in `app.py` plus the four Gemini-vision call sites
+      inside the `main.py` subprocess: `layout_picker.py`,
+      `screencast_layout.py`, `hook_grounding.py`, `main.get_visual_clips`)
+      — refusal happens at the route/function itself (`FEATURE_DISABLED`
+      structured error), not only by omitting a UI control. MCP and CLI
+      inherit the same gate for free since both proxy the same HTTP API.
+      Dashboard also hides the corresponding tabs/buttons
+      (`App.jsx`, `ResultCard.jsx`) as a convenience, not the actual gate.
+      47 new tests in `tests/test_feature_flags.py`; 22 pre-existing
+      upstream tests updated to set the flag they now depend on (they test
+      behavior that sits behind the new gate, e.g. ownership checks on a
+      now-gated route) — full suite: 2578 passed, 56 skipped, 0 failed.
+- [x] Fixtures acquired for acceptance scenarios 1-3 (`tests/fixtures/`,
+      all CC BY / CC BY-SA, license verified directly from source metadata,
+      not assumed) — scenario 4 already covered by the repo's own
+      `demo-openshorts.mp4`.
+- [x] Headless baseline proven end-to-end, three times, on real footage:
+      transcribe → rank (local LLM) → clip → reframe → subtitle → 9:16
+      MP4 export. Scenario 1 (single speaker): 1 clip. Scenario 2 (two
+      speakers): 3 clips, no speaker dropped from frame. Scenario 3
+      (screencast): 2 clips via the local non-Gemini fallback, screen
+      content not fatally cropped. All six output files `ffprobe`-verified
+      1080×1920 H.264/AAC; all three runs `$0` cost, zero calls to Gemini/
+      fal.ai/ElevenLabs. Full detail in `docs/ACCEPTANCE_TESTS.md`.
+- [x] Ollama integration validated empirically, not assumed:
+      `qwen3:4b` **failed** (timed out past `llm_backend.py`'s 600s
+      default — a reasoning model's "thinking" overhead made even one
+      small scoring window too slow on CPU). `llava:7b` **succeeded**
+      on all three fixtures: valid JSON matching the pydantic schema,
+      titles that genuinely reflect each transcript, well under the
+      timeout every time. See `docs/ACCEPTANCE_TESTS.md` "Local-LLM model
+      selection".
+- [x] Passed a local-video smoke test with no Gemini/fal.ai/ElevenLabs —
+      three times (scenarios 1, 2, 3 above), not just once.
 - [ ] `requirements-cpu.lock` version drift (see `docs/UPSTREAM_AUDIT.md`)
       needs a decision: regenerate the lock, or document
       `requirements.txt`-with-resolution as the supported CPU install path

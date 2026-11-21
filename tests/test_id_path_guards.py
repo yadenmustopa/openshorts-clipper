@@ -124,6 +124,7 @@ class TestThumbnailSessionIds:
 
 class TestThumbnailPublishPath:
     def _session(self, cloud, monkeypatch):
+        monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
         sid = str(uuid.uuid4())
         video = cloud / "v.mp4"
         video.write_bytes(b"v")
@@ -159,6 +160,8 @@ class TestThumbnailPublishPath:
 
 class TestSaasRetry:
     def test_a_non_uuid_retry_id_is_rejected(self, cloud, monkeypatch):
+        monkeypatch.setenv("UGC_ENABLED", "true")
+        monkeypatch.setenv("TTS_ENABLED", "true")
         async def entitled(request):
             return None
         monkeypatch.setattr(app_module, "require_managed_entitlement", entitled)

@@ -120,6 +120,7 @@ class TestDetectContentRanges:
 
     def test_no_key_is_a_failure_not_an_empty_answer(self, monkeypatch):
         monkeypatch.setattr(screencast_layout, "ENABLED", True)
+        monkeypatch.setenv("GEMINI_VISION_ENABLED", "true")
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         assert screencast_layout.detect_content_ranges(
             "x.mp4", scenes_of((0, 30)), 30.0) is None

@@ -2747,6 +2747,12 @@ def get_visual_clips(video_path, video_duration, language="en", viewer_clips=Non
     stretch (``vision_segments``), and the picks are merged, de-overlapped
     and cut to the best ``CLIP_TARGET_MAX`` by score: a silent multi-hour
     console capture used to fail at the model."""
+    import feature_flags
+    if not feature_flags.enabled("GEMINI_VISION_ENABLED"):
+        print("❌ This video has no usable speech, so it has to be clipped by "
+              "watching it, and Gemini vision is disabled in this deployment "
+              "(set GEMINI_VISION_ENABLED=true to turn it on).")
+        return None
     print("🎥  Silent video — analyzing with Gemini vision (no transcript)...")
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:

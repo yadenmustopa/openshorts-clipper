@@ -78,6 +78,7 @@ def test_clip_words_uses_word_timestamps_and_falls_back_to_segment_text():
 @pytest.fixture
 def gemini(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setenv("GEMINI_VISION_ENABLED", "true")
     monkeypatch.setattr(hg, "frames_at", lambda path, times, width=None: [b"jpg"] * len(times))
     seen = {}
 

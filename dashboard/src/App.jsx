@@ -287,7 +287,12 @@ const pollJob = async (jobId) => {
 
 function App() {
   // Cloud auth/billing session (inert when billing is disabled).
-  const { billingEnabled, isManaged, isSignedIn, me, plan, refreshMe, jobRetentionSeconds, localLlm, loading: authLoading } = useAuth();
+  const { billingEnabled, isManaged, isSignedIn, me, plan, refreshMe, jobRetentionSeconds, localLlm, features, loading: authLoading } = useAuth();
+  // Mirrors feature_flags.py's defaults: the backend enforces these
+  // independently (require_feature) — this only decides what the UI offers.
+  const ugcEnabled = !!features?.UGC_ENABLED;
+  const dubbingEnabled = !!features?.DUBBING_ENABLED;
+  const socialPublishingEnabled = !!features?.SOCIAL_PUBLISHING_ENABLED;
   const [showLogin, setShowLogin] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
   // Free plan: "want the watermark off?" once per job, when the clips land.
@@ -1451,9 +1456,17 @@ function App() {
     { id: 'dashboard', ord: '01', icon: LayoutDashboard, label: 'Clip Generator', short: 'clips', primary: true },
     // Cloud only: it runs on the managed pipeline and the Upload-Post connection.
     ...(billingEnabled ? [{ id: 'autopilot', ord: '02', icon: Rocket, label: 'Autopilot', short: 'autopilot', isNew: true }] : []),
-    { id: 'saasshorts', ord: '03', icon: Sparkles, label: 'AI Shorts', short: 'ai shorts', byok: true, primary: true },
+    // AI Shorts (UGC generation) is out of scope for this fork's MVP
+    // (feature_flags.UGC_ENABLED, default off) — the backend refuses the
+    // underlying /api/saasshorts/* routes regardless, this just keeps the
+    // UI from offering a control that would only come back FEATURE_DISABLED.
+    ...(ugcEnabled ? [
+      { id: 'saasshorts', ord: '03', icon: Sparkles, label: 'AI Shorts', short: 'ai shorts', byok: true, primary: true },
+    ] : []),
     { id: 'ai-agent', ord: '04', icon: Bot, label: 'AI Agent', short: 'agent', byok: true },
-    { id: 'ugc-gallery', ord: '05', icon: LayoutGrid, label: 'UGC Gallery', short: 'gallery', primary: true },
+    ...(ugcEnabled ? [
+      { id: 'ugc-gallery', ord: '05', icon: LayoutGrid, label: 'UGC Gallery', short: 'gallery', primary: true },
+    ] : []),
     { id: 'thumbnails', ord: '06', icon: Image, label: 'YouTube Studio', short: 'studio', primary: true },
     ...(billingEnabled && isSignedIn ? [{ id: 'history', ord: '07', icon: History, label: 'History', short: 'history' }] : []),
     { id: 'settings', ord: '08', icon: Settings, label: 'Settings', short: 'settings' },

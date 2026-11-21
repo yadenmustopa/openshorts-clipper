@@ -1,5 +1,6 @@
 import os
 import llm_backend
+import feature_flags
 import re
 import sys
 import uuid
@@ -294,6 +295,23 @@ def gemini_missing_error():
         return payment_required(
             "no_plan", "This action needs an active OpenShorts plan (or the user's own API key).")
     return HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+
+
+def feature_disabled_error(flag: str, message: Optional[str] = None) -> HTTPException:
+    """403 for a Clipper-fork feature that is off by default (see
+    ``feature_flags.py``). Same ``detail`` shape as ``payment_required``:
+    a dict with a stable ``error`` code an agent can branch on, not a bare
+    string."""
+    return HTTPException(status_code=403, detail=feature_flags.disabled_detail(flag, message))
+
+
+def require_feature(flag: str, message: Optional[str] = None) -> None:
+    """Raise :func:`feature_disabled_error` unless ``flag`` is on. Call at
+    the top of a handler, before any other work (including key/entitlement
+    checks) — a disabled feature says so, it doesn't first ask for a key it
+    will never use."""
+    if not feature_flags.enabled(flag):
+        raise feature_disabled_error(flag, message)
 
 
 # Probe rate limiter. In-memory, resets on restart by design — the hard monthly
@@ -5693,6 +5711,12 @@ async def get_config(response: Response):
         # Self-host only: tells the dashboard the Gemini key is optional
         # because the moment picker runs on an OpenAI-compatible server.
         "localLlm": None if BILLING_ENABLED else llm_backend.describe(),
+        # Out-of-scope-for-this-fork feature flags (feature_flags.py): the
+        # dashboard uses these to hide/disable the corresponding UI, but the
+        # backend enforces them independently (require_feature) regardless
+        # of what the UI shows — this is a convenience for the UI, not the
+        # actual gate.
+        "features": feature_flags.all_flags(),
     }
 
 async def _probe_youtube_quality(url: str) -> dict:
@@ -6103,6 +6127,7 @@ async def process_endpoint(
     source_start: Optional[str] = Form(None),
     source_end: Optional[str] = Form(None),
 ):
+    require_feature("CLIPPER_ENABLED")
     api_key = await resolve_gemini(request)
     if not api_key and not (llm_backend.active() and not BILLING_ENABLED):
         # Self-host with an OpenAI-compatible server configured needs no
@@ -7225,6 +7250,7 @@ async def edit_clip(
     req: EditRequest,
     request: Request,
 ):
+    require_feature("GEMINI_VISION_ENABLED")
     # Cloud (paid) mode disables BYOK: ignore any body api_key so it can't skip
     # the entitlement gate or metering (mirrors resolve_gemini ignoring the
     # header). Self-host keeps BYOK — the body key wins there.
@@ -8531,6 +8557,7 @@ async def generate_effects_config(
     request: Request,
 ):
     """Generate structured EffectsConfig JSON for Remotion rendering via Gemini AI."""
+    require_feature("GEMINI_VISION_ENABLED")
     final_api_key = await resolve_gemini(request)
 
     if not final_api_key:
@@ -9091,6 +9118,7 @@ class TranslateRequest(BaseModel):
 @app.get("/api/translate/languages")
 async def get_languages():
     """Return supported languages for translation."""
+    require_feature("DUBBING_ENABLED")
     return {"languages": get_supported_languages()}
 
 @app.post("/api/translate")
@@ -9100,6 +9128,7 @@ async def translate_clip(
     x_elevenlabs_key: Optional[str] = Header(None, alias="X-ElevenLabs-Key")
 ):
     """Translate a video clip to a different language using ElevenLabs dubbing."""
+    require_feature("DUBBING_ENABLED")
     if not x_elevenlabs_key:
         raise HTTPException(status_code=400, detail="Missing X-ElevenLabs-Key header")
 
@@ -9318,6 +9347,7 @@ async def _give_back_free_post(ledger_id):
 
 @app.post("/api/social/post")
 async def post_to_socials(req: SocialPostRequest, request: Request):
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     req.platforms = _checked_platforms(req.platforms)
     await _ensure_job_files(req.job_id, request)
     if req.job_id not in jobs:
@@ -9440,6 +9470,7 @@ async def social_post_status(request_id: str, request: Request):
     itself can still fail per platform, and the dashboard used to say "Posted
     successfully!" either way.
     """
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     owner = _post_request_owners.get(request_id)
     if owner is None:
         return {"status": "unknown"}
@@ -9523,6 +9554,7 @@ async def get_social_user(request: Request):
     BYOK: uses the caller's key and returns all profiles on that account.
     Managed: uses the server key but returns ONLY the caller's own profile.
     """
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     api_key, forced_profile = await resolve_upload_post(request, None)
     if not api_key:
          raise HTTPException(status_code=400, detail="Missing X-Upload-Post-Key header")
@@ -9639,6 +9671,7 @@ async def social_profile_analytics(
     user: Optional[str] = None,
 ):
     """Aggregated profile analytics: followers, views, engagement per platform."""
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     api_key, profile = await _social_analytics_auth(request, user)
     return await _upload_post_get(
         api_key,
@@ -9658,6 +9691,7 @@ async def social_post_analytics(
     user: Optional[str] = None,
 ):
     """Per-post metrics for the profile's published posts (Upload-Post cache)."""
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     api_key, profile = await _social_analytics_auth(request, user)
     params = {"user": profile}
     for key, value in (("platform", platform), ("limit", limit),
@@ -9696,6 +9730,7 @@ async def social_total_impressions(
     native posts too: social_metrics.summarise keeps only our posts published
     in the window, latest snapshot each.
     """
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     import social_metrics
 
     days = _PERIOD_DAYS.get(period or "", 30)
@@ -9814,6 +9849,7 @@ async def _scheduled_posts_for(api_key: str, profile: str) -> list:
 @app.get("/api/social/scheduled")
 async def social_scheduled(request: Request, user: Optional[str] = None):
     """Pending scheduled posts for the caller's profile, soonest first."""
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     api_key, profile = await _social_analytics_auth(request, user)
     rows = await _scheduled_posts_for(api_key, profile)
     rows.sort(key=lambda r: r.get("scheduled_date") or "")
@@ -9823,6 +9859,7 @@ async def social_scheduled(request: Request, user: Optional[str] = None):
 @app.delete("/api/social/scheduled/{job_id}")
 async def social_cancel_scheduled(job_id: str, request: Request, user: Optional[str] = None):
     """Cancel one pending scheduled post, if it belongs to the caller."""
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     api_key, profile = await _social_analytics_auth(request, user)
     rows = await _scheduled_posts_for(api_key, profile)
     if not any(r.get("job_id") == job_id for r in rows):
@@ -10084,6 +10121,7 @@ async def thumbnail_analyze(
     x_gemini_key: Optional[str] = Header(None, alias="X-Gemini-Key")
 ):
     """Analyze a video and suggest viral YouTube titles."""
+    require_feature("GEMINI_VISION_ENABLED")
     api_key = await resolve_gemini(request)
     if not api_key:
         raise gemini_missing_error()
@@ -10336,6 +10374,7 @@ async def thumbnail_generate(
     text itself, which is prettier when it works and misspelled when it does
     not. frame: url of a frame from /api/thumbnail/frames to use as the
     person reference when no face photo is uploaded."""
+    require_feature("GEMINI_VISION_ENABLED")
     api_key = await resolve_gemini(request)
     if not api_key:
         raise gemini_missing_error()
@@ -10516,6 +10555,7 @@ async def thumbnail_publish(
     user_id: Optional[str] = Form(None),   # BYOK profile; ignored for managed users
 ):
     """Kick off a background upload to YouTube via Upload-Post and return immediately."""
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     if session_id not in thumbnail_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -10610,6 +10650,7 @@ async def thumbnail_publish(
 @app.get("/api/thumbnail/publish/status/{publish_id}")
 async def thumbnail_publish_status(publish_id: str, request: Request):
     """Poll the status of a background publish job (owner only in cloud mode)."""
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     if publish_id not in publish_jobs:
         raise HTTPException(status_code=404, detail="Publish job not found")
     record = publish_jobs[publish_id]
@@ -10683,6 +10724,7 @@ async def saasshorts_analyze(
     request: Request,
 ):
     """Analyze a URL or manual description and generate video scripts."""
+    require_feature("UGC_ENABLED")
     gemini_key = await resolve_gemini(request)
     if not gemini_key:
         raise gemini_missing_error()
@@ -10749,6 +10791,7 @@ class SaaSActorRequest(BaseModel):
 @app.post("/api/saasshorts/actor-upload")
 async def saasshorts_actor_upload(request: Request, file: UploadFile = File(...)):
     """Upload a custom actor image (stored locally only, not S3)."""
+    require_feature("UGC_ENABLED")
     # SaaSShorts is part of the paid product — require entitlement in cloud mode
     # (no-op for self-host) so anonymous callers can't drive server work.
     await require_managed_entitlement(request)
@@ -10795,6 +10838,7 @@ async def saasshorts_actor_options(
     x_fal_key: Optional[str] = Header(None, alias="X-Fal-Key"),
 ):
     """Generate multiple actor image options for the user to choose from."""
+    require_feature("UGC_ENABLED")
     await require_managed_entitlement(request)
     fal_key = x_fal_key
     if not fal_key:
@@ -10840,6 +10884,7 @@ async def saasshorts_actor_options(
 @app.get("/api/saasshorts/gallery")
 async def saasshorts_video_gallery(limit: int = 50):
     """List all UGC videos from the public gallery."""
+    require_feature("UGC_ENABLED")
     try:
         loop = asyncio.get_running_loop()
         videos = await loop.run_in_executor(None, list_video_gallery, limit)
@@ -10862,6 +10907,8 @@ class SaaSPostRequest(BaseModel):
 @app.post("/api/saasshorts/post")
 async def saasshorts_post_to_socials(req: SaaSPostRequest, request: Request):
     """Post an AI Shorts video to social media via Upload-Post."""
+    require_feature("UGC_ENABLED")
+    require_feature("SOCIAL_PUBLISHING_ENABLED")
     req.platforms = _checked_platforms(req.platforms)
     if req.job_id not in saas_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -11192,6 +11239,7 @@ def _actor_owner_tag(user_id) -> Optional[str]:
 @app.get("/api/saasshorts/actor-gallery")
 async def saasshorts_actor_gallery(request: Request):
     """The shared actor gallery, plus the signed-in caller's own actors."""
+    require_feature("UGC_ENABLED")
     try:
         owner_tag = _actor_owner_tag(await _owner_id(request))
         loop = asyncio.get_running_loop()
@@ -11221,6 +11269,8 @@ async def saasshorts_generate(
     x_elevenlabs_key: Optional[str] = Header(None, alias="X-ElevenLabs-Key"),
 ):
     """Generate a SaaS UGC video from a script. Returns a job_id for polling."""
+    require_feature("UGC_ENABLED")
+    require_feature("TTS_ENABLED")
     await require_managed_entitlement(request)
     fal_key = x_fal_key
     elevenlabs_key = x_elevenlabs_key
@@ -11412,6 +11462,7 @@ async def saasshorts_generate(
 @app.get("/api/saasshorts/status/{job_id}")
 async def saasshorts_status(job_id: str, request: Request):
     """Poll SaaSShorts job status."""
+    require_feature("UGC_ENABLED")
     if job_id not in saas_jobs:
         raise HTTPException(status_code=404, detail="SaaSShorts job not found")
 
@@ -11429,6 +11480,7 @@ async def saasshorts_voices(
     x_elevenlabs_key: Optional[str] = Header(None, alias="X-ElevenLabs-Key"),
 ):
     """List available ElevenLabs voices."""
+    require_feature("TTS_ENABLED")
     if x_elevenlabs_key:
         try:
             loop = asyncio.get_event_loop()

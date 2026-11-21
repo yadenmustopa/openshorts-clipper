@@ -365,6 +365,9 @@ def detect_content_ranges(video_path, scenes, fps):
     """
     if not ENABLED:
         return []
+    import feature_flags
+    if not feature_flags.enabled("GEMINI_VISION_ENABLED"):
+        return []
     if not scenes:
         return None
     api_key = os.getenv("GEMINI_API_KEY")

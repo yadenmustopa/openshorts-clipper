@@ -98,3 +98,41 @@ resolved.
   **not run** in Phase 0/1 — recommended before any internet-facing
   deployment, and explicitly required before Phase 3 exposes any API
   surface to an agent running outside this machine.
+
+## 5. Feature gating (Phase 1)
+
+`feature_flags.py` (new, root) is the single source of truth for whether
+UGC generation, TTS, dubbing, social publishing, and Gemini vision are
+reachable. Default: all off except `CLIPPER_ENABLED`/`LOCAL_LLM_ENABLED`.
+Gated at the route/function itself (`app.py`: 26 call sites via a
+`require_feature()` helper returning a structured `{"error":
+"FEATURE_DISABLED", "feature": <name>, "message": ...}` 403 — same shape
+as the existing `payment_required` convention; `main.py`'s subprocess-side
+Gemini-vision call sites — `layout_picker.pick`, `screencast_layout.detect_content_ranges`,
+`hook_grounding.reground`, `main.get_visual_clips` — via a direct
+`feature_flags.enabled("GEMINI_VISION_ENABLED")` check, independent of
+whether a Gemini key happens to be present). MCP (`mcp_server.py`) and the
+CLI (`cli/openshorts_cli.py`) both proxy the same HTTP API, so they
+inherit every gate without separate code. The dashboard additionally hides
+the corresponding tabs/buttons (`App.jsx`, `ResultCard.jsx`) as a UX
+convenience — not the actual enforcement point. `cloud/` itself was not
+modified (its own `BILLING_ENABLED` gate is a stronger, route-doesn't-exist
+gate already). Tests: `tests/test_feature_flags.py` (47 new), plus 22
+pre-existing upstream tests updated to set the flag their tested behavior
+now sits behind (e.g. an ownership check on a route that's gated off by
+default needs the gate opened first to reach the code under test).
+
+## 6. Local-LLM performance on this machine (Phase 1 finding)
+
+A 4B "thinking"/reasoning model (`qwen3:4b`) timed out (>600s,
+`llm_backend.py`'s default) scoring a single transcript window from a 90s
+clip — CPU-only, no NVIDIA GPU (see `docs/ENVIRONMENT.md`). A 7B
+non-reasoning model (`llava:7b`) succeeded on all three local-footage
+fixtures tried (single speaker, two speakers, screencast — see
+`docs/ACCEPTANCE_TESTS.md`), every time well under the timeout, with valid
+JSON and a qualitatively sensible, transcript-accurate result. This
+matches upstream's own README guidance ("7-8B models return valid JSON
+reliably, 3B ones do not") and extends it with a CPU-specific data point:
+parameter count alone doesn't predict practicality on CPU-only hardware —
+a reasoning model's token overhead matters as much as its size. Full
+evidence in `docs/ACCEPTANCE_TESTS.md` "Local-LLM model selection".

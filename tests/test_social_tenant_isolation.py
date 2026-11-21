@@ -94,6 +94,7 @@ class TestImpressionsWithoutAProfile:
     409, and the vendor must not be called."""
 
     def test_returns_the_empty_card(self, monkeypatch):
+        monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
         monkeypatch.setattr(app_module, "BILLING_ENABLED", True)
 
         async def no_profile(request, body_key=None):

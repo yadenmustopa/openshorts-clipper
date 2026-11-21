@@ -199,6 +199,9 @@ def pick(video_path, video_duration):
     """
     if not ENABLED:
         return "none"
+    import feature_flags
+    if not feature_flags.enabled("GEMINI_VISION_ENABLED"):
+        return "none"
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return "none"

@@ -203,6 +203,7 @@ class TestThumbnailBilling:
 @pytest.fixture()
 def thumb_cloud(cloud_user, dirs, monkeypatch):
     """Cloud Thumbnail Studio with a fake ledger, probe and downloader."""
+    monkeypatch.setenv("GEMINI_VISION_ENABLED", "true")
     log = SimpleNamespace(order=[], reserved=[], downloads=[], probe_minutes=60.0,
                           remaining=20.0, budget_spent=False)
 
@@ -384,6 +385,7 @@ def test_description_prompt_is_bounded(monkeypatch):
 # Social: profiles and posting
 # --------------------------------------------------------------------------- #
 def test_reading_social_state_never_creates_a_vendor_profile(cloud_user, monkeypatch):
+    monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
     async def _boom(user):
         raise AssertionError("profile created on a read")
     monkeypatch.setattr(app_module, "cloud", cloud)
@@ -407,6 +409,7 @@ def test_stored_profile_is_still_used(cloud_user):
 
 
 def test_thumbnail_publish_never_falls_back_to_the_client_profile(cloud_user, monkeypatch):
+    monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
     monkeypatch.setattr(app_module, "thumbnail_sessions", {"s1": {"user_id": None}})
     resp = _call("post", "/api/thumbnail/publish", data={
         "session_id": "s1", "title": "t", "description": "d",
@@ -489,6 +492,7 @@ class TestFreePostsArePaid:
         assert ledger.rows == {}
 
     def test_a_post_that_fails_gives_its_try_back(self, cloud_user, ledger, monkeypatch, tmp_path):
+        monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
         monkeypatch.setattr(app_module, "OUTPUT_DIR", str(tmp_path))
         (tmp_path / "j1").mkdir()
         (tmp_path / "j1" / "c.mp4").write_bytes(b"v")
@@ -555,7 +559,8 @@ def test_oauth_registration_is_rate_limited_per_ip(monkeypatch):
     ({"description": "x", "num_scripts": 0}, "num_scripts"),
     ({"description": "x" * (config.SAAS_DESCRIPTION_MAX_CHARS + 1)}, "description"),
 ])
-def test_saasshorts_inputs_are_bounded(body, field):
+def test_saasshorts_inputs_are_bounded(body, field, monkeypatch):
+    monkeypatch.setenv("UGC_ENABLED", "true")
     r = _call("post", "/api/saasshorts/analyze", json=body, headers={"X-Gemini-Key": "k"})
     assert r.status_code in (400, 413)
     assert field in r.json()["detail"]

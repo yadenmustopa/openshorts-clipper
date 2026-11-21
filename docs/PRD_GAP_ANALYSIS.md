@@ -37,15 +37,28 @@ real PRD's §B/§C/§H directly. No redesign was needed on those points.
 
 1. **Fixture for PRD acceptance scenarios #1-3, #7, #8, #10** (single
    speaker, two speakers, screencast, render failure, restart/resume,
-   output verification) — all need either a real speech-bearing local
-   video or a decision to defer them. Not resolved yet; was asked about
-   once and the question was dismissed without a choice being made, so it
-   is asked again, more narrowly, alongside this report.
-2. **`schemas/`, `integrations/hyperframes/`, `agent/skills/autonomous-clipper/`,
-   `tests/smoke/`** — all explicitly Phase 1+/2+/3+ in the PRD's own
-   layout diagram; not created yet in Phase 0/1, which is correct per the
-   PRD, not a gap.
-3. **Feature-gating implementation** (backend + UI, not just UI) for
-   `translate.py`, `social_platforms.py`, `social_metrics.py`,
-   `twitch_signals.py`, `saasshorts.py` — designed (see `AGENTS.md` rule 2,
-   `docs/ROADMAP.md` Phase 1) but not yet coded.
+   output verification) — **resolved**: fixtures for scenarios 1-3 were
+   fetched independently per the user's follow-up instruction (CC BY / CC
+   BY-SA, license verified from source metadata — see
+   `tests/fixtures/README.md`); scenario 4 was already covered by the
+   repo's own `demo-openshorts.mp4`. Running them through the pipeline is
+   what surfaced the next real finding (model selection, below) — not a
+   gap in this document anymore, see `docs/ACCEPTANCE_TESTS.md`.
+2. **`schemas/`, `integrations/hyperframes/`, `agent/skills/autonomous-clipper/`
+   — explicitly Phase 2+/3+ in the PRD's own layout diagram; not created
+   yet in Phase 1, which is correct per the PRD, not a gap.
+   `tests/smoke/` was scaffolded with a status README in Phase 0; still not
+   populated with a passing automated test, now blocked on the
+   model-selection finding below rather than on a fixture.
+3. **Feature-gating implementation** — **resolved**: `feature_flags.py`
+   plus 26+4 call-site gates across `app.py`/`main.py`/`layout_picker.py`/
+   `screencast_layout.py`/`hook_grounding.py`, defense-in-depth (backend
+   route refuses regardless of UI state), 47 new tests, full suite green.
+   See `docs/ROADMAP.md` Phase 1 for the exact count and file list.
+4. **Local-LLM model selection for the moment-scoring stage** —
+   **resolved**: `qwen3:4b` timed out (>600s) on this CPU-only machine; a
+   second model, `llava:7b` (7B, non-reasoning), succeeded on all three
+   fixtures (scenarios 1-3), every time with valid JSON and a title that
+   genuinely matched its transcript, every time at $0 cost. See
+   `docs/ACCEPTANCE_TESTS.md` "Local-LLM model selection" and the
+   per-scenario rows for full evidence.

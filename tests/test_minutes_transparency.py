@@ -208,6 +208,7 @@ class TestYoutubeTitle:
 
 
 def test_post_status_only_answers_the_account_that_posted(monkeypatch):
+    monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
     monkeypatch.setattr(app_module, "_post_request_owners", {"req-1": "someone-else"})
 
     async def _owner(request):

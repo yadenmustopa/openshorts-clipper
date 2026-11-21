@@ -79,7 +79,12 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     const [showDescModal, setShowDescModal] = useState(false);
     const [showSubtitleModal, setShowSubtitleModal] = useState(false);
     const [showWatermarkModal, setShowWatermarkModal] = useState(false);
-    const { plan } = useAuth();
+    const { plan, features } = useAuth();
+    // Backend refuses these independently (require_feature in app.py)
+    // regardless of what's shown here — this only keeps the UI from
+    // offering a control that would only come back FEATURE_DISABLED.
+    const dubbingEnabled = !!features?.DUBBING_ENABLED;
+    const socialPublishingEnabled = !!features?.SOCIAL_PUBLISHING_ENABLED;
     const videoRef = React.useRef(null);
     // Pristine base clip (no burned subtitles/hook), stable regardless of how
     // clip.video_url mutates after server edits. Used as the compositing base
@@ -1124,21 +1129,25 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                         {isHooking ? 'saving…' : 'edit hook'}
                     </button>
 
-                    <button
-                        onClick={() => setShowTranslateModal(true)}
-                        disabled={isTranslating}
-                        className={QUIET_BTN}
-                    >
-                        {isTranslating ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Languages size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
-                        {isTranslating ? 'translating…' : 'dub voice'}
-                    </button>
+                    {dubbingEnabled && (
+                        <button
+                            onClick={() => setShowTranslateModal(true)}
+                            disabled={isTranslating}
+                            className={QUIET_BTN}
+                        >
+                            {isTranslating ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Languages size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
+                            {isTranslating ? 'translating…' : 'dub voice'}
+                        </button>
+                    )}
 
-                    <button
-                        onClick={() => setShowModal(true)}
-                        className="btn-primary flex-col gap-1 py-2.5 sm:py-2 px-1 text-[11px] leading-none rounded-input whitespace-nowrap"
-                    >
-                        <Share2 size={16} className="shrink-0" /> post
-                    </button>
+                    {socialPublishingEnabled && (
+                        <button
+                            onClick={() => setShowModal(true)}
+                            className="btn-primary flex-col gap-1 py-2.5 sm:py-2 px-1 text-[11px] leading-none rounded-input whitespace-nowrap"
+                        >
+                            <Share2 size={16} className="shrink-0" /> post
+                        </button>
+                    )}
                     <button
                         onClick={(e) => {
                             e.preventDefault();

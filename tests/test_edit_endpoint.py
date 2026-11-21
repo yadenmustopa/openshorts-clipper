@@ -30,6 +30,7 @@ def _request(json_body):
 
 @pytest.fixture()
 def job(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_VISION_ENABLED", "true")
     out_root = tmp_path / "output"
     job_dir = out_root / JOB_ID
     job_dir.mkdir(parents=True)
