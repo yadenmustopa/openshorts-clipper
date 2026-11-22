@@ -2,6 +2,42 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ Fork notice: this is `openshorts-clipper`
+
+This repository is a fork of `mutonby/openshorts` being adapted into a
+self-hosted **Autonomous AI Video Clipper** (OpenShorts for clipping +
+[HyperFrames](https://github.com/heygen-com/hyperframes) for rendering/motion
+graphics + an AI agent for orchestration). Everything below this notice is
+the **original upstream guidance** and is still accurate for working in this
+codebase — read it in full. It is extended, not replaced, by:
+
+- `AGENTS.md` — agent-agnostic hard rules for this fork (local-first, no
+  mandatory paid API, license boundaries, no speculative deletion).
+- `docs/PRD_OpenShorts_Clipper_Claude_Work.md` — the source-of-truth PRD
+  supplied by the user. `docs/PRD.md`, `ARCHITECTURE.md`, `ROADMAP.md`,
+  `UPSTREAM_AUDIT.md`, `LICENSE_AUDIT.md`, `ACCEPTANCE_TESTS.md`,
+  `ADR/0001-fork-and-worker-boundaries.md` — this fork's working
+  implementation of that PRD. `docs/PRD_GAP_ANALYSIS.md` tracks known
+  deltas between the two.
+
+Key deltas from upstream you must keep in mind while editing:
+
+- **No mandatory paid API.** The default pipeline must work with no Gemini
+  key, no ElevenLabs key, no `BILLING_ENABLED`. `llm_backend.py`'s
+  OpenAI-compatible local-LLM path is the model for how to do this; extend
+  that pattern rather than hard-wiring new cloud calls into `main.py`.
+- **Not building:** AI UGC/avatar generation, AI actors, dubbing, TTS,
+  auto-publishing. Don't extend `translate.py` (ElevenLabs dubbing) or the
+  `social_platforms.py` / `saasshorts.py` auto-publish paths — they stay
+  dormant, feature-flagged off, not deleted.
+- **`cloud/` stays untouched and unused.** It is under the OpenShorts
+  Commercial License (`cloud/LICENSE`), not MIT — fine to self-host
+  personally, not something this project depends on or extends.
+- **Gemini Web via Computer Use** is an explicitly later-phase, optional
+  provider for the vision-dependent stages (`layout_picker.py`,
+  `screencast_layout.py`, `main.get_visual_clips`) that still need a vision
+  model. Do not build this in Phase 0/1 unless asked.
+
 ## Project Overview
 
 OpenShorts is an AI-powered vertical video generator that turns long YouTube videos or local uploads into short 9:16 clips for TikTok, Instagram Reels and YouTube Shorts. Google Gemini 3.1 Flash-Lite (`gemini-3.1-flash-lite`, overridable with `GEMINI_MODEL`) picks the viral moments and writes the titles. It ships as self-host (BYOK) and as a Cloud edition (`BILLING_ENABLED`, code under `cloud/`).

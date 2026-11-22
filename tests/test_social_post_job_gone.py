@@ -9,6 +9,7 @@ app_module = pytest.importorskip("app")
 
 
 def test_job_dropped_during_key_resolution_is_a_404(monkeypatch):
+    monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
     job_id = "job-gone-mid-request"
     app_module.jobs[job_id] = {"status": "completed", "result": {"clips": []}}
 
@@ -39,6 +40,7 @@ def test_job_dropped_during_key_resolution_is_a_404(monkeypatch):
 def test_a_clip_pointing_at_a_file_never_written_posts_the_one_it_has(tmp_path, monkeypatch):
     """A failed edit used to record a name it never wrote; the post then died
     on "Video file not found" although the clip's real file was right there."""
+    monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
     job_id = "job-with-a-stale-url"
     job_dir = tmp_path / job_id
     job_dir.mkdir()

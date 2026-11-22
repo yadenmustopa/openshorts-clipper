@@ -53,7 +53,15 @@ def model_name() -> str:
 
 
 def active() -> bool:
-    """True when the moment picker should call the OpenAI-compatible server."""
+    """True when the moment picker should call the OpenAI-compatible server.
+
+    ``LOCAL_LLM_ENABLED`` (default on) is this fork's master switch: set it
+    to false to force the Gemini-only path even with ``LLM_BASE_URL``
+    configured, e.g. to test the upstream behavior without unsetting the
+    URL."""
+    import feature_flags
+    if not feature_flags.enabled("LOCAL_LLM_ENABLED"):
+        return False
     return provider() == "openai" and bool(base_url())
 
 

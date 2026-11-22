@@ -52,3 +52,8 @@ CLAUDE.local.md
 
 # Rust build output
 osrender/target/
+
+# Downloaded/derived test fixtures (large media): tests/fixtures/README.md
+# documents provenance/license, fetch_fixtures.sh reproduces the download —
+# neither the media nor yt-dlp's sidecar files belong in git.
+tests/fixtures/cache/

@@ -36,7 +36,22 @@ const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }) {
-  const [config, setConfig] = useState({ billingEnabled: false, googleAuthEnabled: false });
+  // Matches feature_flags.py's own defaults so the UI never offers a
+  // control the backend will refuse, even before /api/config resolves.
+  const [config, setConfig] = useState({
+    billingEnabled: false,
+    googleAuthEnabled: false,
+    features: {
+      CLIPPER_ENABLED: true,
+      LOCAL_LLM_ENABLED: true,
+      UGC_ENABLED: false,
+      TTS_ENABLED: false,
+      DUBBING_ENABLED: false,
+      SOCIAL_PUBLISHING_ENABLED: false,
+      GEMINI_VISION_ENABLED: false,
+      CLOUD_BILLING_ENABLED: false,
+    },
+  });
   const [me, setMe] = useState(null);           // /api/me payload, or null when signed out
   const [loading, setLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
@@ -224,6 +239,7 @@ export function AuthProvider({ children }) {
   const value = {
     billingEnabled: config.billingEnabled,
     localLlm: config.localLlm || null,
+    features: config.features,
     googleAuthEnabled: config.googleAuthEnabled,
     jobRetentionSeconds: config.jobRetentionSeconds || null,
     loading,

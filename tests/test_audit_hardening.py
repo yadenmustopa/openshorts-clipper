@@ -245,6 +245,7 @@ def cloud_as(monkeypatch):
 
 
 def test_publish_status_is_owner_only(cloud_as, monkeypatch):
+    monkeypatch.setenv("SOCIAL_PUBLISHING_ENABLED", "true")
     monkeypatch.setattr(app_module, "publish_jobs", {
         "p1": {"status": "done", "result": {"ok": 1}, "error": None, "user_id": "owner"}})
     cloud_as["user"] = _User("stranger")
@@ -267,6 +268,7 @@ def test_render_status_is_owner_only(cloud_as, monkeypatch):
 
 
 def test_thumbnail_generate_refuses_someone_elses_session(cloud_as, monkeypatch):
+    monkeypatch.setenv("GEMINI_VISION_ENABLED", "true")
     async def _gemini(request):
         return "k"
     monkeypatch.setattr(app_module, "resolve_gemini", _gemini)
