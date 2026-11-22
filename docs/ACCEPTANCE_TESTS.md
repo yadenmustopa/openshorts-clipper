@@ -57,6 +57,24 @@ once a working model was found.
 | 7 | No module deleted, no destructive git operation | PASS — diff is additive plus two in-place doc edits |
 | 8 | No other repository touched | PASS — confined to this fork's own working tree |
 
+## Phase 2 — HyperFrames PoC quality control
+
+Required checks from the Phase 2 directive, against real renders (not
+claimed): see `docs/architecture/hyperframes-integration.md` for the full
+writeup, `docs/qa/phase2-hyperframes/` for screenshots.
+
+| Check | Result |
+|---|---|
+| Output 1080×1920, H.264/AAC | PASS — `ffprobe` on all 3 preset outputs |
+| Durasi dan FPS valid | PASS — 27.776s, 30fps, matches source clip duration |
+| Audio tetap sinkron | PASS — `volumedetect`: −18.5dB mean / −1.8dB max on all 3 outputs vs. source's −18.4/−1.6dB (encoding-rounding-level difference, not a sync or level defect) |
+| Subtitle mengikuti timestamp transkrip | PASS — captions built directly from `words_for_clip()`'s clip-relative conversion of the same faster-whisper word timestamps `main.py` produced; visually confirmed in the contact sheet at 6 timestamps across the clip |
+| Tidak ada black frame atau visual yang hilang | PASS — `ffmpeg blackdetect` reports none on any of the 3 outputs |
+| Tidak ada cropping fatal pada wajah atau screencast | PASS — `object-fit: cover` on an already-9:16-reframed source means no new cropping is introduced; visually confirmed in the contact sheet |
+| Aset tidak membutuhkan network request ketika render | PASS — GSAP vendored locally (`assets/vendor/gsap.min.js`, asserted by `test_gsap_is_vendored_locally_not_a_cdn`); one-time setup downloads (npx package cache, headless-Chrome download) are not per-render |
+| Project tetap editable | PARTIAL — the generated `index.html` is a normal HyperFrames project (`npx hyperframes check`/`snapshot`/`timeline` all work against it), but it is regenerated per render by the adapter rather than hand-edited; no human-editing workflow was exercised in this PoC |
+| Hasil render dapat diulang dengan konfigurasi yang sama | NOT_RUN — a second render of the same clip+preset to confirm structural repeatability (resolution/codec/duration/no-black-frames reproduce) was not performed in this phase; recorded as a gap in `docs/architecture/hyperframes-integration.md`, not assumed |
+
 ## Environment distinction (PRD §M requirement: "bedakan test cloud dari local user's PC")
 
 **There is no distinction to draw.** `docs/ENVIRONMENT.md` establishes with

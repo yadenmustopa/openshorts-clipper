@@ -57,3 +57,13 @@ osrender/target/
 # documents provenance/license, fetch_fixtures.sh reproduces the download —
 # neither the media nor yt-dlp's sidecar files belong in git.
 tests/fixtures/cache/
+
+# HyperFrames project (integrations/hyperframes/): the adapter regenerates
+# index.html per render and copies in whatever clip it's rendering, so
+# neither belongs in git — docs/architecture/hyperframes-integration.md and
+# hyperframes_adapter.py are the actual source of truth. .hyperframes/ is
+# the CLI's own cache/history/artifacts dir.
+integrations/hyperframes/index.html
+integrations/hyperframes/assets/*.mp4
+integrations/hyperframes/.hyperframes/
+integrations/hyperframes/node_modules/
