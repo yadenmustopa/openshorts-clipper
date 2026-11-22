@@ -12,7 +12,17 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
-from ultralytics import YOLO
+from ultralytics import YOLO, settings as _ultralytics_settings
+
+if _ultralytics_settings.get("sync"):
+    # ultralytics/utils/events.py posts anonymous usage analytics to
+    # google-analytics.com on a background thread on every YOLO() call —
+    # this is a *different* mechanism from the Sentry crash reporter (which
+    # is gated on sys.argv[0] == "yolo" and never fires for library usage).
+    # This project is local-first and must not phone home; `sync` is the
+    # documented ultralytics opt-out (persisted to its own settings.json,
+    # so set it once and never again rather than writing on every import).
+    _ultralytics_settings.update({"sync": False})
 import torch
 import os
 import math

@@ -14,9 +14,14 @@ import pytest
 
 from hyperframes_adapter import (
     PRESETS,
+    ProbeResult,
+    WorkspaceEscapeError,
+    _prepare_workspace,
     build_index_html,
     group_words,
     load_manifest_from_job,
+    resolve_within,
+    validate_rendered_output,
     words_for_clip,
 )
 from timeline_manifest import Clip, Overlay, SourceInfo, TimelineManifest, Word
@@ -174,3 +179,96 @@ class TestLoadManifestFromJob:
         assert c.layout.mode == "track"
         assert c.overlays[0].text == "Look at this"
         assert [w.text for w in c.words] == ["hi", "there"]
+
+
+class TestResolveWithin:
+    def test_a_plain_subpath_resolves(self, tmp_path):
+        result = resolve_within(str(tmp_path), "a", "b.mp4")
+        assert result == os.path.realpath(os.path.join(str(tmp_path), "a", "b.mp4"))
+
+    def test_the_base_dir_itself_resolves(self, tmp_path):
+        assert resolve_within(str(tmp_path)) == os.path.realpath(str(tmp_path))
+
+    def test_dotdot_escape_is_rejected(self, tmp_path):
+        with pytest.raises(WorkspaceEscapeError):
+            resolve_within(str(tmp_path), "..", "..", "etc", "passwd")
+
+    def test_a_symlink_pointing_outside_the_base_is_rejected(self, tmp_path):
+        outside = tmp_path.parent / "outside_target"
+        outside.mkdir(exist_ok=True)
+        base = tmp_path / "base"
+        base.mkdir()
+        link = base / "escape"
+        os.symlink(str(outside), str(link))
+        with pytest.raises(WorkspaceEscapeError):
+            resolve_within(str(base), "escape", "file.txt")
+
+    def test_a_symlink_pointing_inside_the_base_is_allowed(self, tmp_path):
+        base = tmp_path / "base"
+        base.mkdir()
+        real_sub = base / "real"
+        real_sub.mkdir()
+        link = base / "alias"
+        os.symlink(str(real_sub), str(link))
+        result = resolve_within(str(base), "alias", "file.txt")
+        assert result == os.path.realpath(str(real_sub / "file.txt"))
+
+
+class TestPrepareWorkspace:
+    def test_two_clips_of_the_same_job_get_separate_workspaces(self, tmp_path):
+        job_dir = str(tmp_path / "job1")
+        ws1 = _prepare_workspace(job_dir, "clipA", "clean_podcast")
+        ws2 = _prepare_workspace(job_dir, "clipB", "clean_podcast")
+        assert ws1 != ws2
+        assert os.path.isdir(ws1) and os.path.isdir(ws2)
+
+    def test_same_clip_different_preset_gets_separate_workspace(self, tmp_path):
+        job_dir = str(tmp_path / "job1")
+        ws1 = _prepare_workspace(job_dir, "clipA", "clean_podcast")
+        ws2 = _prepare_workspace(job_dir, "clipA", "bold_kinetic")
+        assert ws1 != ws2
+
+    def test_two_different_jobs_get_separate_workspaces_even_with_the_same_clip_id(self, tmp_path):
+        ws1 = _prepare_workspace(str(tmp_path / "jobA"), "clip_1", "clean_podcast")
+        ws2 = _prepare_workspace(str(tmp_path / "jobB"), "clip_1", "clean_podcast")
+        assert ws1 != ws2
+        assert ws1.startswith(os.path.realpath(str(tmp_path / "jobA")))
+        assert ws2.startswith(os.path.realpath(str(tmp_path / "jobB")))
+
+    def test_a_stale_workspace_from_a_previous_run_is_reset_not_merged(self, tmp_path):
+        job_dir = str(tmp_path / "job1")
+        ws = _prepare_workspace(job_dir, "clipA", "clean_podcast")
+        stale_file = os.path.join(ws, "index.html")
+        with open(stale_file, "w") as f:
+            f.write("stale content from a previous render")
+        ws2 = _prepare_workspace(job_dir, "clipA", "clean_podcast")
+        assert ws2 == ws
+        assert not os.path.exists(stale_file)  # wiped, not left behind
+
+    def test_vendor_assets_are_copied_into_the_workspace(self, tmp_path):
+        ws = _prepare_workspace(str(tmp_path / "job1"), "clipA", "clean_podcast")
+        assert os.path.exists(os.path.join(ws, "assets", "vendor", "gsap.min.js"))
+
+
+class TestValidateRenderedOutput:
+    def test_missing_file_is_not_ok(self, tmp_path):
+        report = validate_rendered_output(str(tmp_path / "missing.mp4"), expected_duration_s=10.0)
+        assert report.ok is False
+        assert "missing" in report.problems[0] or "empty" in report.problems[0]
+
+    def test_empty_file_is_not_ok(self, tmp_path):
+        path = tmp_path / "empty.mp4"
+        path.write_bytes(b"")
+        report = validate_rendered_output(str(path), expected_duration_s=10.0)
+        assert report.ok is False
+
+    def test_a_non_video_file_fails_ffprobe_cleanly(self, tmp_path):
+        path = tmp_path / "not_a_video.mp4"
+        path.write_bytes(b"this is not an mp4 file, just text pretending to be one" * 10)
+        report = validate_rendered_output(str(path), expected_duration_s=10.0)
+        assert report.ok is False
+        assert report.problems  # some reason is recorded, not a silent False
+
+    def test_probe_result_dataclass_defaults_are_safe(self):
+        r = ProbeResult()
+        assert r.exists is False and r.has_video_stream is False and r.has_audio_stream is False

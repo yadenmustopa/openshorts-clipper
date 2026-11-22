@@ -1,10 +1,13 @@
 # HyperFrames integration (Phase 2)
 
-Status: proof-of-concept, built and verified with real renders against
-real Phase 1 footage (not a toy/synthetic test). See
-`docs/ACCEPTANCE_TESTS.md` for the exact evidence and
-`docs/ADR/0002-remotion-vs-hyperframes.md` for the Remotion decision this
-unblocks.
+Status: hardened past proof-of-concept (Step A). The PoC proved the
+architecture; Step A hardening (this pass) is what makes concurrent,
+multi-job production use actually safe — the two are not the same claim,
+and the PoC was explicitly **not** treated as automatic proof of the
+latter. Built and verified with real renders against real Phase 1 footage
+(not a toy/synthetic test). See `docs/ACCEPTANCE_TESTS.md` for the exact
+evidence and `docs/ADR/0002-remotion-vs-hyperframes.md` for the Remotion
+decision this unblocks.
 
 ## Architecture
 
@@ -74,6 +77,68 @@ HyperFrames source is copied into this repository — see
 - Every rendered asset path is relative (`assets/<file>.mp4`, no leading
   `/`) and verified by `test_video_asset_path_has_no_leading_slash`.
 
+## Workspace isolation (Step A.1/A.3, hardening)
+
+The PoC rendered every clip into the single shared
+`integrations/hyperframes/` template directory — fine for one render at a
+time by hand, unsafe the moment two clips (or two jobs) render
+concurrently, since `main.py`'s `ThreadPoolExecutor` (`CLIP_WORKERS`)
+already does exactly that for a job's own clips.
+
+`render_clip()` now takes a required `job_output_dir` argument and calls
+`_prepare_workspace(job_output_dir, clip_id, preset_name)`, which builds a
+fresh `<job_output_dir>/hyperframes_render/<clip_id>/<preset>/` directory
+per call — wiping (`shutil.rmtree`) any stale content before copying the
+template files and vendored assets in, so a previous failed/aborted
+render's leftovers are never silently merged into a new one. Every path
+the adapter touches (template files, the clip's own video, the generated
+`index.html`) is resolved through `resolve_within(base_dir, *parts)`,
+which uses `os.path.realpath` to reject both `..`-traversal and a
+symlink that resolves outside the workspace (`WorkspaceEscapeError`).
+
+Verified in `tests/test_hyperframes_adapter.py`: different `clip_id` →
+different workspace, different `preset` → different workspace, different
+`job_output_dir` with the same `clip_id` → different workspace, a stale
+workspace's content is wiped not merged, and a real `os.symlink` pointed
+outside `base_dir` is rejected by `resolve_within` (a symlink pointing
+*inside* `base_dir` is correctly allowed).
+
+## Hardened output validation (Step A.4)
+
+The PoC's validation was "process exit code 0 and output file size > 0" —
+real risk: ffmpeg/Chrome can exit 0 and still produce a corrupt, silent,
+or wrong-resolution file. `validate_rendered_output()` now runs real
+`ffprobe -show_format -show_streams` (`probe_output()`: codec, resolution,
+duration, audio/video stream presence) plus an `ffmpeg blackdetect` sweep
+(`detect_black_frames()`) and returns a `ValidationReport` with every
+mismatch spelled out, not just a boolean. `render_clip(..., validate=True)`
+(the default) calls this automatically after a successful process exit
+and attaches the report to `RenderResult.validation`.
+
+## Structural repeatability (Step A.5, hardening)
+
+Not re-run in the PoC (flagged there as a real gap). Hardening pass: the
+identical `clip_video_abspath` + preset was rendered twice back-to-back
+into two separate job-output directories; both runs passed
+`validate_rendered_output()` and, stronger than what was required,
+produced **byte-for-byte identical** output (same MD5 checksum, same file
+size) — the per-job/per-clip workspace isolation did not introduce any
+cross-run nondeterminism.
+
+## Real-footage preset tests (Step A.6, hardening)
+
+The PoC exercised only the single-speaker fixture against all three
+presets. Hardening pass adds genuinely different content types per
+preset, both through the hardened `render_clip()` (isolated workspace +
+full validation):
+
+- `clean_podcast` against the real two-speaker fixture
+  (`scenario2_two_speakers_clip_1.mp4`) — passed `ffprobe`/black-frame
+  validation with neither speaker dropped from frame.
+- `educational_screen` against the real screencast fixture
+  (`scenario3_screencast_clip_1.mp4`) — passed the same validation against
+  screen-content footage, not talking-head footage.
+
 ## Three presets
 
 | Preset | Caption grouping | Position | Word treatment | Hook style |
@@ -122,18 +187,38 @@ Rendered MP4s themselves are not committed (same policy as
 python3 -c "
 from hyperframes_adapter import load_manifest_from_job, render_clip
 m = load_manifest_from_job('<job>_metadata.json', '<source>.mp4', '<job_id>')
-render_clip(m, 0, 'clean_podcast', '<job>_clip_1.mp4', 'out.mp4', quality='looks')
+render_clip(m, 0, 'clean_podcast', '<job>_clip_1.mp4', 'out.mp4',
+            job_output_dir='<job_output_dir>', quality='looks')
 "
 ```
 
-## What this PoC does not cover
+## What Step A hardening still does not cover (open gaps — explicit, not assumed closed)
 
+The user's directive was explicit: do not treat the PoC as automatic
+proof the worker is safe for concurrent production jobs. Workspace
+isolation, hardened validation, and structural repeatability are now
+verified (above); the following are genuinely still open:
+
+- **No live concurrent-job test against the full `app.py`/job-queue
+  stack.** `tests/test_hyperframes_adapter.py::TestPrepareWorkspace`
+  proves two workspaces never collide at the filesystem level (unit
+  test, synthetic job dirs); it does not exercise two real `main.py` job
+  processes rendering through HyperFrames at the same moment on this
+  machine. That end-to-end concurrency proof is deferred to Phase 3's
+  MVP acceptance test (PRD §L item explicitly calling for "two
+  concurrent jobs").
 - Multi-clip batch rendering (the adapter renders one clip+preset per
-  call; nothing prevents looping it, nothing has exercised looping it).
+  call; nothing prevents looping it, nothing has exercised looping it
+  under load).
 - `render --docker --strict` (the reproducible-container render path) —
   only the plain local `render` was exercised.
-- Byte-for-byte render repeatability was not tested (video encoding has
-  normal minor nondeterminism); structural repeatability (same
-  resolution/codec/duration/no-black-frames on a repeat run) was not
-  re-run a second time in this phase — a real gap, not asserted as done.
-- The `educational_screen` pointer/highlight feature (see above).
+- The `educational_screen` pointer/highlight feature (see above) —
+  unimplemented, not a hardening regression.
+- The residual outbound-connection investigation (`ultralytics/utils/
+  events.py`'s analytics pinger) is tracked in `docs/UPSTREAM_AUDIT.md`
+  §6, not here — it is a dependency-telemetry finding, not a HyperFrames
+  integration gap, but it affects the same "no internet required" claim
+  this document makes about the render path itself (the render path's
+  own zero-network behavior, headless Chrome + node only talking over
+  127.0.0.1 CDP, is independently verified and unaffected by that
+  finding).

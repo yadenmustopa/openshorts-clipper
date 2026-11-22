@@ -146,22 +146,63 @@ are cached — the job succeeds identically with or without it, confirming
 the check was non-essential (the already-cached model is used in both
 cases).
 
-**Not fully resolved:** a second, smaller external connection (Azure ASN)
-persisted even with both offline env vars set. Investigated but not
-conclusively identified: `ultralytics`' built-in Sentry telemetry was
-checked and ruled out (`set_sentry()`'s own guard clause requires
-`sys.argv[0]` to be literally `"yolo"` — the CLI binary name — which is
-never true when `ultralytics` is imported as a library from `main.py`, so
-it short-circuits before `sentry_sdk.init()`). The exact source among
-`mediapipe`/`onnxruntime`/`ctranslate2`/`transnetv2-pytorch` was not
-pinned down within this phase's time budget. **The job's actual output
-was byte-for-byte unaffected** by this connection existing or not (same
-success, same clip count class of outcome) — it is best-effort/telemetry-
-shaped, not a functional dependency, but it is an honest open item, not a
-closed one. A self-hoster wanting airtight zero-egress should block it at
-the OS level (e.g. `/etc/hosts` or a firewall rule once its exact hostname
-is identified) rather than rely on an application-level fix that isn't
-confirmed to exist yet.
+**Resolved (Phase 2 Step A.7 hardening pass).** The earlier "Azure ASN,
+unidentified" finding above was re-investigated with a purpose-built
+tracer (a `sitecustomize.py` on `PYTHONPATH` that monkey-patches
+`socket.socket.connect` to print a full stack trace, with thread name,
+on any non-loopback/non-LAN connect) rather than relying on `ss -tnp`
+sampling, which can only show *that* a connection happened, not *who*
+made it. Five candidates were checked directly in source and ruled out
+first: `hooks.py`'s font downloader (file already present, not
+triggered), `py3langid`'s `urlopen` (CLI-only, gated behind an unused
+`--url` flag never passed by this codebase), `matplotlib`'s
+`_open_file_or_url` (gated behind an explicit URL argument this codebase
+never supplies), `transnetv2_pytorch` (no network code in its source at
+all), and `ultralytics`' Sentry crash reporter (the already-ruled-out
+`set_sentry()` guard, ruled out again for completeness).
+
+The real source, caught with a full stack trace: **`ultralytics/utils/
+events.py`'s `_post()`** — a *separate* mechanism from the Sentry
+reporter, running on its own background daemon thread
+(`Thread-2 (_post)`), that POSTs anonymous usage analytics to
+`google-analytics.com` (explaining both the earlier "Azure ASN" IPs and
+the Google-ASN IPs seen in different runs — same mechanism, Google's
+Measurement Protocol endpoint, different edge IPs each time). It is
+gated by `ultralytics.SETTINGS["sync"]`, read once at import time into
+the module-level `events = Events()` singleton's `self.enabled` — the
+documented, first-class ultralytics opt-out (`yolo settings sync=False`
+or `ultralytics.settings.update({"sync": False})`), not an undocumented
+workaround.
+
+**Fix applied**, `main.py`:
+
+```python
+from ultralytics import YOLO, settings as _ultralytics_settings
+
+if _ultralytics_settings.get("sync"):
+    _ultralytics_settings.update({"sync": False})
+```
+
+Placed immediately after the `ultralytics` import and before any `YOLO(
+)` model construction elsewhere in the file — confirmed by direct test
+that `ultralytics.utils.events` is *not* eagerly imported by `from
+ultralytics import YOLO` itself (it is imported lazily, later, by a
+training/predict callback), so setting `sync=False` at this point reads
+back as `False` when `Events.__init__` eventually runs. The setting
+persists to ultralytics' own `~/.config/Ultralytics/settings.json`
+(confirmed path on this machine), so the `if` guard means this writes to
+disk at most once per machine, never on every job's `main.py` subprocess
+after the first.
+
+**Verified live, not just unit-tested:** `~/.config/Ultralytics/
+settings.json` was deleted to force a from-scratch state (reproducing
+what a brand-new install/Docker image would see), then the full
+scenario-1 pipeline was re-run end-to-end with the same `socket.connect`
+tracer active and `HF_HUB_OFFLINE=1`/`TRANSFORMERS_OFFLINE=1` still set:
+**zero outbound connects observed for the entire run, job completed
+successfully.** This closes both the "Azure" item and the general
+no-internet-after-cache claim (Step A.8) with real evidence, not an
+inference from the fix reading correctly in isolation.
 
 **Recommendation for the default config:** set `HF_HUB_OFFLINE=1` and
 `TRANSFORMERS_OFFLINE=1` by default once a self-hosted install's models
