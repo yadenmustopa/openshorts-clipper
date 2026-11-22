@@ -57,6 +57,45 @@ once a working model was found.
 | 7 | No module deleted, no destructive git operation | PASS — diff is additive plus two in-place doc edits |
 | 8 | No other repository touched | PASS — confined to this fork's own working tree |
 
+## Phase 2 — HyperFrames PoC quality control
+
+Required checks from the Phase 2 directive, against real renders (not
+claimed): see `docs/architecture/hyperframes-integration.md` for the full
+writeup, `docs/qa/phase2-hyperframes/` for screenshots.
+
+| Check | Result |
+|---|---|
+| Output 1080×1920, H.264/AAC | PASS — `ffprobe` on all 3 preset outputs |
+| Durasi dan FPS valid | PASS — 27.776s, 30fps, matches source clip duration |
+| Audio tetap sinkron | PASS — `volumedetect`: −18.5dB mean / −1.8dB max on all 3 outputs vs. source's −18.4/−1.6dB (encoding-rounding-level difference, not a sync or level defect) |
+| Subtitle mengikuti timestamp transkrip | PASS — captions built directly from `words_for_clip()`'s clip-relative conversion of the same faster-whisper word timestamps `main.py` produced; visually confirmed in the contact sheet at 6 timestamps across the clip |
+| Tidak ada black frame atau visual yang hilang | PASS — `ffmpeg blackdetect` reports none on any of the 3 outputs |
+| Tidak ada cropping fatal pada wajah atau screencast | PASS — `object-fit: cover` on an already-9:16-reframed source means no new cropping is introduced; visually confirmed in the contact sheet |
+| Aset tidak membutuhkan network request ketika render | PASS — GSAP vendored locally (`assets/vendor/gsap.min.js`, asserted by `test_gsap_is_vendored_locally_not_a_cdn`); one-time setup downloads (npx package cache, headless-Chrome download) are not per-render |
+| Project tetap editable | PARTIAL — the generated `index.html` is a normal HyperFrames project (`npx hyperframes check`/`snapshot`/`timeline` all work against it), but it is regenerated per render by the adapter rather than hand-edited; no human-editing workflow was exercised in this PoC |
+| Hasil render dapat diulang dengan konfigurasi yang sama | **PASS (Step A hardening re-run)** — two independent renders of the same clip+preset, each into its own isolated workspace, produced byte-for-byte identical MP4s (same MD5 checksum, same file size) — stronger than the structural-only repeatability the check asked for. See below. |
+
+## Phase 2 Step A — Hardening acceptance (post-PoC, pre-merge)
+
+Per the explicit instruction not to treat the PoC as proof the worker is
+safe for concurrent production jobs. Every row below is a real command
+run in this phase, not an inference from the PoC.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Per-job/per-clip workspace isolation (never a shared `index.html`/assets dir) | PASS | `tests/test_hyperframes_adapter.py::TestPrepareWorkspace` (5 tests): different `clip_id`, different `preset`, and different `job_output_dir` each produce a distinct workspace path; a stale workspace's content is wiped (`shutil.rmtree`) not merged on reuse; vendor assets copied in fresh each time. |
+| Path traversal / symlink escape rejected | PASS | `tests/test_hyperframes_adapter.py::TestResolveWithin` (5 tests, including a real `os.symlink` created in `tmp_path` pointing outside `base_dir` → `WorkspaceEscapeError`; a symlink pointing *inside* `base_dir` is correctly allowed). `tests/test_timeline_manifest.py::TestPathTraversalAndIdentifierHardening` (parametrized: `../escape.mp4`, `a/../../escape.mp4`, `a//b.mp4`, null-byte/newline paths, unsafe `clip_id`/`job_id` values) — 40 tests total in that file, all passing. |
+| All file ops confined to resolved job workspace | PASS | Every path the adapter opens (template files, clip video, generated `index.html`) goes through `resolve_within(base_dir, *parts)`, which calls `os.path.realpath` and rejects anything not under `base_dir`. |
+| FFprobe-based output validation (not just exit code + size) | PASS | `hyperframes_adapter.validate_rendered_output()` runs real `ffprobe -show_format -show_streams` plus `ffmpeg blackdetect`; `render_clip(..., validate=True)` (default) calls it automatically and attaches a `ValidationReport` to `RenderResult.validation`. 4 unit tests (`TestValidateRenderedOutput`) plus exercised live against both real-footage renders below. |
+| Structural repeatability (same preset, re-rendered) | PASS, stronger than required | Rendered `clean_podcast` against the real two-speaker fixture twice, into two separate job output dirs; both passed `validate_rendered_output()` and produced **byte-identical** MP4s (MD5 match, size match) — video encoders normally have minor nondeterminism, so this is stronger evidence than the check strictly asked for. |
+| `educational_screen` against a real screencast fixture | PASS | `scenario3_screencast_clip_1.mp4` → `educational_screen_screencast.mp4`, through the hardened `render_clip()` (isolated workspace), passed full `ffprobe`/black-frame validation. |
+| `clean_podcast` against a real two-speaker fixture | PASS | `scenario2_two_speakers_clip_1.mp4` → `clean_podcast_two_speaker.mp4`, same validation path, passed. |
+| Dependency/network audit — unidentified outbound connection | PASS (root-caused and fixed) | Traced via a custom `socket.connect` monkey-patch tracer to `ultralytics/utils/events.py`'s `_post()` — an anonymous-analytics pinger (`google-analytics.com`), a *different* mechanism from the already-ruled-out Sentry crash reporter. Fixed in `main.py` by setting `ultralytics.settings.update({"sync": False})` once (idempotent — only writes when not already disabled) right after the `ultralytics` import, before `events.py` is ever lazily imported downstream. Re-ran the full scenario-1 pipeline from a freshly-reset `~/.config/Ultralytics/settings.json` with the tracer active: **0 outbound connects**, job completed successfully. Full detail in `docs/UPSTREAM_AUDIT.md` §6. |
+| Reproducible offline render after caches/models warm | PASS (re-confirmed with the fix applied) | Same re-run as above: `HF_HUB_OFFLINE=1`/`TRANSFORMERS_OFFLINE=1` plus the ultralytics `sync=False` fix, zero external connects, job succeeded end-to-end. |
+| Full test suite in the project's real CPU environment | PASS | `.venv-trace/bin/python3 -m pytest tests/ -v` — see exact pass/skip/fail counts logged at the time this hardening pass was pushed (recorded in the PR description, not restated here to avoid this doc drifting out of sync with a number that belongs to one specific run). |
+| Dashboard build | PASS | `npm run build` in `dashboard/` — unaffected by this pass (no dashboard files touched). |
+| Concurrent-job render safety against the real job queue | **NOT_RUN — explicit open gap** | Workspace-collision safety is proven at the filesystem level (unit tests above), not by actually running two `main.py` jobs through `app.py`'s queue at the same wall-clock moment. Deferred to Phase 3's MVP acceptance test, which explicitly requires two concurrent jobs. Not claimed as PASS. |
+
 ## Environment distinction (PRD §M requirement: "bedakan test cloud dari local user's PC")
 
 **There is no distinction to draw.** `docs/ENVIRONMENT.md` establishes with
