@@ -122,7 +122,55 @@ pre-existing upstream tests updated to set the flag their tested behavior
 now sits behind (e.g. an ownership check on a route that's gated off by
 default needs the gate opened first to reach the code under test).
 
-## 6. Local-LLM performance on this machine (Phase 1 finding)
+## 6. No-outbound-internet test (Phase 1 Step A.5)
+
+Tested, not assumed: ran the scenario-1 pipeline twice with
+`ss -tnp` sampled every second against the exact PID, once plain and once
+with `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` set, distinguishing
+localhost (`127.0.0.1:11434`, Ollama — expected, this is the local model
+server) and the machine's own LAN address (`192.168.1.12`, the source
+address of outbound sockets, not a destination) from genuine public
+internet.
+
+| Run | External (public-internet) hosts contacted | Job outcome |
+|---|---|---|
+| Plain (no offline flags) | `13.35.202.121:443` (AWS CloudFront, reverse-resolves to `*.sin2.r.cloudfront.net` — Hugging Face Hub's CDN) and `20.184.175.4:443` (Microsoft/Azure ASN, unidentified) | Succeeded (3 clips) |
+| `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` | Only `20.184.175.14:443` (same Azure ASN block, unidentified) | Succeeded (2 clips) |
+
+**Finding:** the Hugging Face Hub freshness check `faster_whisper.utils.
+download_model` triggers via `huggingface_hub.snapshot_download` (called
+from `transcribe_backends.py`'s model loader, which does not pass
+`local_files_only=True` or otherwise force offline mode) is real and is
+fixed by setting `HF_HUB_OFFLINE=1`/`TRANSFORMERS_OFFLINE=1` once models
+are cached — the job succeeds identically with or without it, confirming
+the check was non-essential (the already-cached model is used in both
+cases).
+
+**Not fully resolved:** a second, smaller external connection (Azure ASN)
+persisted even with both offline env vars set. Investigated but not
+conclusively identified: `ultralytics`' built-in Sentry telemetry was
+checked and ruled out (`set_sentry()`'s own guard clause requires
+`sys.argv[0]` to be literally `"yolo"` — the CLI binary name — which is
+never true when `ultralytics` is imported as a library from `main.py`, so
+it short-circuits before `sentry_sdk.init()`). The exact source among
+`mediapipe`/`onnxruntime`/`ctranslate2`/`transnetv2-pytorch` was not
+pinned down within this phase's time budget. **The job's actual output
+was byte-for-byte unaffected** by this connection existing or not (same
+success, same clip count class of outcome) — it is best-effort/telemetry-
+shaped, not a functional dependency, but it is an honest open item, not a
+closed one. A self-hoster wanting airtight zero-egress should block it at
+the OS level (e.g. `/etc/hosts` or a firewall rule once its exact hostname
+is identified) rather than rely on an application-level fix that isn't
+confirmed to exist yet.
+
+**Recommendation for the default config:** set `HF_HUB_OFFLINE=1` and
+`TRANSFORMERS_OFFLINE=1` by default once a self-hosted install's models
+are known to be cached (e.g. in `.env.example`, commented, with the
+instruction to uncomment after first run) — not done in this phase since
+it changes first-run (cold cache) behavior and deserves its own decision,
+not a side effect of an audit.
+
+## 7. Local-LLM performance on this machine (Phase 1 finding)
 
 A 4B "thinking"/reasoning model (`qwen3:4b`) timed out (>600s,
 `llm_backend.py`'s default) scoring a single transcript window from a 90s
